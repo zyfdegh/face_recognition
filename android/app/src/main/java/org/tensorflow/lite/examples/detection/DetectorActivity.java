@@ -40,6 +40,9 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
+
+import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.mlkit.vision.common.InputImage;
@@ -92,7 +95,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   //private static final Size CROP_SIZE = new Size(320, 320);
 
 
-  private static final boolean SAVE_PREVIEW_BITMAP = false;
+  private static final boolean SAVE_FACE_WHEN_ADD = true;
   private static final float TEXT_SIZE_DIP = 10;
   OverlayView trackingOverlay;
   private Integer sensorOrientation;
@@ -105,10 +108,11 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   private Bitmap cropCopyBitmap = null;
 
   private boolean computingDetection = false;
-  private boolean addPending = false;
+  private boolean canAddFace = false;
+  private boolean faceDetected = false;
   //private boolean adding = false;
 
-  private long timestamp = 0;
+  private long imageCounter = 0;
 
   private Matrix frameToCropTransform;
   private Matrix cropToFrameTransform;
@@ -128,7 +132,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
   private FloatingActionButton fabAdd;
 
-  //private HashMap<String, Classifier.Recognition> knownFaces = new HashMap<>();
+//  private HashMap<String, Classifier.Recognition> knownFaces = new HashMap<>();
 
 
   @Override
@@ -157,17 +161,18 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
     faceDetector = detector;
 
 
-    //checkWritePermission();
+//    checkWritePermission();
 
   }
 
 
 
   private void onAddClick() {
-
-    addPending = true;
+    canAddFace = true;
     //Toast.makeText(this, "click", Toast.LENGTH_LONG ).show();
-
+    if (!faceDetected) {
+      Toast.makeText(this, "未检测到人脸", Toast.LENGTH_SHORT ).show();
+    }
   }
 
   @Override
@@ -269,8 +274,8 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
   @Override
   protected void processImage() {
-    ++timestamp;
-    final long currTimestamp = timestamp;
+    ++imageCounter;
+    final long currImgCounter = imageCounter;
     trackingOverlay.postInvalidate();
 
     // No mutex needed as this method is not reentrant.
@@ -280,7 +285,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
     }
     computingDetection = true;
 
-    LOGGER.i("Preparing image " + currTimestamp + " for detection in bg thread.");
+    LOGGER.v("Preparing image " + currImgCounter + " for detection in bg thread.");
 
     rgbFrameBitmap.setPixels(getRgbBytes(), 0, previewWidth, 0, 0, previewWidth, previewHeight);
 
@@ -288,27 +293,34 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
     final Canvas canvas = new Canvas(croppedBitmap);
     canvas.drawBitmap(rgbFrameBitmap, frameToCropTransform, null);
-    // For examining the actual TF input.
-    if (SAVE_PREVIEW_BITMAP) {
-      ImageUtils.saveBitmap(croppedBitmap);
-    }
 
     InputImage image = InputImage.fromBitmap(croppedBitmap, 0);
     faceDetector
             .process(image)
+            .addOnFailureListener(new OnFailureListener() {
+              @Override
+              public void onFailure(@NonNull Exception e) {
+
+              }
+            })
             .addOnSuccessListener(new OnSuccessListener<List<Face>>() {
               @Override
               public void onSuccess(List<Face> faces) {
                 if (faces.size() == 0) {
-                  updateResults(currTimestamp, new LinkedList<>());
+                  updateResults(currImgCounter, new LinkedList<>());
+                  LOGGER.d("---- no face detected");
+                  canAddFace = false;
+                  faceDetected = false;
                   return;
                 }
+                LOGGER.d("---- face detected");
+                faceDetected = true;
                 runInBackground(
                         new Runnable() {
                           @Override
                           public void run() {
-                            onFacesDetected(currTimestamp, faces, addPending);
-                            addPending = false;
+                            onFacesDetected(currImgCounter, faces, canAddFace);
+                            canAddFace = false;
                           }
                         });
               }
@@ -391,9 +403,16 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
     TextView tvTitle = dialogLayout.findViewById(R.id.dlg_title);
     EditText etName = dialogLayout.findViewById(R.id.dlg_input);
 
-    tvTitle.setText("Add Face");
-    ivFace.setImageBitmap(rec.getCrop());
-    etName.setHint("Input name");
+    tvTitle.setText("添加人脸");
+    if (getCameraFacing() == CameraCharacteristics.LENS_FACING_FRONT) {
+      Matrix matrix = new Matrix();
+      matrix.preScale(-1.0f, 1.0f);
+      // flip left to right
+      ivFace.setImageBitmap(Bitmap.createBitmap(rec.getCrop(), 0, 0, rec.getCrop().getWidth(), rec.getCrop().getHeight(), matrix, true));
+    } else {
+      ivFace.setImageBitmap(rec.getCrop());
+    }
+    etName.setHint("如姓名拼音");
 
     builder.setPositiveButton("OK", new DialogInterface.OnClickListener(){
       @Override
@@ -404,7 +423,13 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
               return;
           }
           detector.register(name, rec);
+
+          // For examining the actual TF input.
+          if (SAVE_FACE_WHEN_ADD) {
+            ImageUtils.saveBitmap(rec.getCrop(), name,System.currentTimeMillis() + ".png");
+          }
           //knownFaces.put(name, rec);
+
           dlg.dismiss();
       }
     });
@@ -413,9 +438,9 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
   }
 
-  private void updateResults(long currTimestamp, final List<SimilarityClassifier.Recognition> mappedRecognitions) {
+  private void updateResults(long currImgCounter, final List<SimilarityClassifier.Recognition> mappedRecognitions) {
 
-    tracker.trackResults(mappedRecognitions, currTimestamp);
+    tracker.trackResults(mappedRecognitions, currImgCounter);
     trackingOverlay.postInvalidate();
     computingDetection = false;
     //adding = false;
@@ -424,7 +449,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
     if (mappedRecognitions.size() > 0) {
        LOGGER.i("Adding results");
        SimilarityClassifier.Recognition rec = mappedRecognitions.get(0);
-       if (rec.getExtra() != null) {
+       if (rec.getExtra() != null && rec.getCrop() != null) {
          showAddFaceDialog(rec);
        }
 
@@ -442,8 +467,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
   }
 
-  private void onFacesDetected(long currTimestamp, List<Face> faces, boolean add) {
-
+  private void onFacesDetected(long currImgCounter, List<Face> faces, boolean add) {
     cropCopyBitmap = Bitmap.createBitmap(croppedBitmap);
     final Canvas canvas = new Canvas(cropCopyBitmap);
     final Paint paint = new Paint();
@@ -486,13 +510,13 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
     for (Face face : faces) {
 
-      LOGGER.i("FACE" + face.toString());
-      LOGGER.i("Running detection on face " + currTimestamp);
-      //results = detector.recognizeImage(croppedBitmap);
+      LOGGER.i("FACE: " + face.toString());
+      LOGGER.i("Running detection on face " + currImgCounter);
+//      results = detector.recognizeImage(croppedBitmap);
 
       final RectF boundingBox = new RectF(face.getBoundingBox());
 
-      //final boolean goodConfidence = result.getConfidence() >= minimumConfidence;
+//      final boolean goodConfidence = result.getConfidence() >= minimumConfidence;
       final boolean goodConfidence = true; //face.get;
       if (boundingBox != null && goodConfidence) {
 
@@ -522,11 +546,22 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
         Bitmap crop = null;
 
         if (add) {
-          crop = Bitmap.createBitmap(portraitBmp,
-                            (int) faceBB.left,
-                            (int) faceBB.top,
-                            (int) faceBB.width(),
-                            (int) faceBB.height());
+//          if (face.getSmilingProbability() == null) {
+//            Toast.makeText(this, "笑一下呗", Toast.LENGTH_SHORT ).show();
+//          }
+          LOGGER.d("face left: %d, right: %d top: %d, bottom: %d, width: %d, height: %d, portrait width: %d, portrait height: %d",
+                  (int)faceBB.left, (int)faceBB.right, (int)faceBB.top, (int)faceBB.bottom, (int)faceBB.width(), (int)faceBB.height(), portraitBmp.getWidth(), portraitBmp.getHeight());
+          if (faceBB.left + faceBB.width() > portraitBmp.getWidth()) {
+            Toast.makeText(this, "脸部在屏幕边缘", Toast.LENGTH_SHORT ).show();
+            continue;
+          } else {
+            // DetectorActivity: face left: 118, right: 506 top: 188, bottom: 646, width: 388, height: 458, portrait width: 480, portrait height: 640
+            crop = Bitmap.createBitmap(portraitBmp,
+                    (int) faceBB.left,
+                    (int) faceBB.top,
+                    (int) faceBB.width(),
+                    (int) faceBB.height());
+          }
         }
 
         final long startTime = SystemClock.uptimeMillis();
@@ -550,8 +585,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
             label = result.getTitle();
             if (result.getId().equals("0")) {
               color = Color.GREEN;
-            }
-            else {
+            } else {
               color = Color.RED;
             }
           }
@@ -592,7 +626,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 //      lastSaved = System.currentTimeMillis();
 //    }
 
-    updateResults(currTimestamp, mappedRecognitions);
+    updateResults(currImgCounter, mappedRecognitions);
 
 
   }

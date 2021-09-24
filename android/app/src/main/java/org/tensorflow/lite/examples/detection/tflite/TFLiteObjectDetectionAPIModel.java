@@ -33,6 +33,7 @@ import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Vector;
@@ -93,9 +94,14 @@ public class TFLiteObjectDetectionAPIModel
 // Face Mask Detector Output
   private float[][] output;
 
-  private HashMap<String, Recognition> registered = new HashMap<>();
+  // 支持一个人多张人脸图
+  private HashMap<String, List<Recognition>> registered = new HashMap<>();
   public void register(String name, Recognition rec) {
-      registered.put(name, rec);
+      if (registered.get(name) == null) {
+        registered.put(name,new ArrayList<Recognition>(){{add(rec);}});
+      } else {
+        registered.get(name).add(rec);
+      }
   }
 
   private TFLiteObjectDetectionAPIModel() {}
@@ -169,23 +175,32 @@ public class TFLiteObjectDetectionAPIModel
   }
 
   // looks for the nearest embeeding in the dataset (using L2 norm)
-  // and retrurns the pair <id, distance>
+  // and returns the pair <id, distance>
   private Pair<String, Float> findNearest(float[] emb) {
 
     Pair<String, Float> ret = null;
-    for (Map.Entry<String, Recognition> entry : registered.entrySet()) {
+    for (Map.Entry<String, List<Recognition>> entry : registered.entrySet()) {
         final String name = entry.getKey();
-        final float[] knownEmb = ((float[][]) entry.getValue().getExtra())[0];
+        Iterator<Recognition> iter = entry.getValue().iterator();
+        // 当前这个人的最相似人脸
+        float nearestDistance = Float.MAX_VALUE;
+        while (iter.hasNext()) {
+          final float[] knownEmb = ((float[][]) iter.next().getExtra())[0];
 
-        float distance = 0;
-        for (int i = 0; i < emb.length; i++) {
-              float diff = emb[i] - knownEmb[i];
-              distance += diff*diff;
+          float distance = 0;
+          for (int i = 0; i < emb.length; i++) {
+            float diff = emb[i] - knownEmb[i];
+            distance += diff*diff;
+          }
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+          }
         }
-        distance = (float) Math.sqrt(distance);
-        if (ret == null || distance < ret.second) {
-            ret = new Pair<>(name, distance);
+        nearestDistance = (float) Math.sqrt(nearestDistance);
+        if (ret == null || nearestDistance < ret.second) {
+          ret = new Pair<>(name, nearestDistance);
         }
+
     }
 
     return ret;
