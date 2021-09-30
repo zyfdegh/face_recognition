@@ -1,0 +1,3 @@
+/Users/ferdi/codes/github.com/face_recognition/android/engine/src/main/cpp/CMakeFiles/rebuild_cache.dir
+/Users/ferdi/codes/github.com/face_recognition/android/engine/src/main/cpp/CMakeFiles/edit_cache.dir
+/Users/ferdi/codes/github.com/face_recognition/android/engine/src/main/cpp/CMakeFiles/engine.dir

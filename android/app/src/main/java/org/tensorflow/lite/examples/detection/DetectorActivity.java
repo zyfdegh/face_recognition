@@ -52,6 +52,7 @@ import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.LinkedList;
 import java.util.List;
 import org.tensorflow.lite.examples.detection.customview.OverlayView;
@@ -62,6 +63,8 @@ import org.tensorflow.lite.examples.detection.env.Logger;
 import org.tensorflow.lite.examples.detection.tflite.SimilarityClassifier;
 import org.tensorflow.lite.examples.detection.tflite.TFLiteObjectDetectionAPIModel;
 import org.tensorflow.lite.examples.detection.tracking.MultiBoxTracker;
+
+import static org.tensorflow.lite.examples.engine.FaceBoxKt.NewFaceBoxFrom;
 
 /**
  * An activity that uses a TensorFlowMultiBoxDetector and ObjectTracker to detect and then track
@@ -100,6 +103,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   OverlayView trackingOverlay;
   private Integer sensorOrientation;
 
+  // 人脸识别
   private SimilarityClassifier detector;
 
   private long lastProcessingTimeMs;
@@ -122,7 +126,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
   private BorderedText borderedText;
 
-  // Face detector
+  // 人脸检测
   private FaceDetector faceDetector;
 
   // here the preview image is drawn in portrait way
@@ -133,6 +137,26 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   private FloatingActionButton fabAdd;
 
 //  private HashMap<String, Classifier.Recognition> knownFaces = new HashMap<>();
+
+  // 活体检测
+  private boolean liveFaceEnginePrepared = false;
+  private EngineWrapper liveFaceEngine;
+
+  @Override
+  public synchronized void onResume() {
+    liveFaceEngine = new EngineWrapper(getAssets());
+    liveFaceEnginePrepared = liveFaceEngine.init();
+    if (!liveFaceEnginePrepared) {
+      Toast.makeText(this, "Engine init failed.", Toast.LENGTH_LONG).show();
+    }
+    super.onResume();
+  }
+
+  @Override
+  public synchronized void onDestroy() {
+    liveFaceEngine.destroy();
+    super.onDestroy();
+  }
 
 
   @Override
@@ -509,13 +533,21 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
     boolean saved = false;
 
     for (Face face : faces) {
-
       LOGGER.i("FACE: " + face.toString());
+
+      LOGGER.i("Running face live check on face " + currImgCounter);
+      ByteBuffer buf = ByteBuffer.allocate(faceBmp.getByteCount());
+      faceBmp.copyPixelsToBuffer(buf);
+
+      DetectionResult liveDetectResult = liveFaceEngine.detect(buf.array(), faceBmp.getWidth(), faceBmp.getHeight(), sensorOrientation, NewFaceBoxFrom(face.getBoundingBox()));
+      liveDetectResult.setThreshold(0.915F);
+      boolean realFace =  liveDetectResult.getThreshold() > liveDetectResult.getThreshold();
+      LOGGER.i("Face live check result on img %d: confidence: %.4f, threshold: %.4f, real? %b", currImgCounter, liveDetectResult.getConfidence(), liveDetectResult.getThreshold(), realFace);
+
       LOGGER.i("Running detection on face " + currImgCounter);
 //      results = detector.recognizeImage(croppedBitmap);
 
       final RectF boundingBox = new RectF(face.getBoundingBox());
-
 //      final boolean goodConfidence = result.getConfidence() >= minimumConfidence;
       final boolean goodConfidence = true; //face.get;
       if (boundingBox != null && goodConfidence) {
@@ -585,6 +617,9 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
             label = result.getTitle();
             if (result.getId().equals("0")) {
               color = Color.GREEN;
+            } else if (!realFace) {
+              color = Color.BLACK;
+              label = "假脸";
             } else {
               color = Color.RED;
             }
