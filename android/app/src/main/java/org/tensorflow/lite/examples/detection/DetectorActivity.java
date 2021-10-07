@@ -63,6 +63,7 @@ import org.tensorflow.lite.examples.detection.env.Logger;
 import org.tensorflow.lite.examples.detection.tflite.SimilarityClassifier;
 import org.tensorflow.lite.examples.detection.tflite.TFLiteObjectDetectionAPIModel;
 import org.tensorflow.lite.examples.detection.tracking.MultiBoxTracker;
+import org.tensorflow.lite.examples.engine.FaceBox;
 
 import static org.tensorflow.lite.examples.engine.FaceBoxKt.NewFaceBoxFrom;
 
@@ -94,6 +95,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   private static final boolean MAINTAIN_ASPECT = false;
 
   private static final Size DESIRED_PREVIEW_SIZE = new Size(640, 480);
+  private static final Size LIVE_INPUT_SIZE = new Size(640, 480);
   //private static final int CROP_SIZE = 320;
   //private static final Size CROP_SIZE = new Size(320, 320);
 
@@ -109,6 +111,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   private long lastProcessingTimeMs;
   private Bitmap rgbFrameBitmap = null;
   private Bitmap croppedBitmap = null;
+  private Bitmap liveInputImg = null;
   private Bitmap cropCopyBitmap = null;
 
   private boolean computingDetection = false;
@@ -119,6 +122,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   private long imageCounter = 0;
 
   private Matrix frameToCropTransform;
+  private Matrix frameToLiveTransform;
   private Matrix cropToFrameTransform;
   //private Matrix cropToPortraitTransform;
 
@@ -252,7 +256,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
     int cropH = (int) (targetH / 2.0);
 
     croppedBitmap = Bitmap.createBitmap(cropW, cropH, Config.ARGB_8888);
-
+    liveInputImg = Bitmap.createBitmap(640, 480, Config.ARGB_8888);
     portraitBmp = Bitmap.createBitmap(targetW, targetH, Config.ARGB_8888);
     faceBmp = Bitmap.createBitmap(TF_OD_API_INPUT_SIZE, TF_OD_API_INPUT_SIZE, Config.ARGB_8888);
 
@@ -262,11 +266,11 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
                     cropW, cropH,
                     sensorOrientation, MAINTAIN_ASPECT);
 
-//    frameToCropTransform =
-//            ImageUtils.getTransformationMatrix(
-//                    previewWidth, previewHeight,
-//                    previewWidth, previewHeight,
-//                    sensorOrientation, MAINTAIN_ASPECT);
+    frameToLiveTransform =
+            ImageUtils.getTransformationMatrix(
+                    previewWidth, previewHeight,
+                    LIVE_INPUT_SIZE.getWidth(), LIVE_INPUT_SIZE.getHeight(),
+                    sensorOrientation, MAINTAIN_ASPECT);
 
     cropToFrameTransform = new Matrix();
     frameToCropTransform.invert(cropToFrameTransform);
@@ -317,6 +321,9 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
     final Canvas canvas = new Canvas(croppedBitmap);
     canvas.drawBitmap(rgbFrameBitmap, frameToCropTransform, null);
+
+    final Canvas liveCV = new Canvas(liveInputImg);
+    liveCV.drawBitmap(rgbFrameBitmap, frameToLiveTransform, null);
 
     InputImage image = InputImage.fromBitmap(croppedBitmap, 0);
     faceDetector
@@ -535,15 +542,6 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
     for (Face face : faces) {
       LOGGER.i("FACE: " + face.toString());
 
-      LOGGER.i("Running face live check on face " + currImgCounter);
-      ByteBuffer buf = ByteBuffer.allocate(faceBmp.getByteCount());
-      faceBmp.copyPixelsToBuffer(buf);
-
-      DetectionResult liveDetectResult = liveFaceEngine.detect(buf.array(), faceBmp.getWidth(), faceBmp.getHeight(), sensorOrientation, NewFaceBoxFrom(face.getBoundingBox()));
-      liveDetectResult.setThreshold(0.915F);
-      boolean realFace =  liveDetectResult.getThreshold() > liveDetectResult.getThreshold();
-      LOGGER.i("Face live check result on img %d: confidence: %.4f, threshold: %.4f, real? %b", currImgCounter, liveDetectResult.getConfidence(), liveDetectResult.getThreshold(), realFace);
-
       LOGGER.i("Running detection on face " + currImgCounter);
 //      results = detector.recognizeImage(croppedBitmap);
 
@@ -581,7 +579,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 //          if (face.getSmilingProbability() == null) {
 //            Toast.makeText(this, "笑一下呗", Toast.LENGTH_SHORT ).show();
 //          }
-          LOGGER.d("face left: %d, right: %d top: %d, bottom: %d, width: %d, height: %d, portrait width: %d, portrait height: %d",
+          LOGGER.d("add face left: %d, right: %d top: %d, bottom: %d, width: %d, height: %d, portrait width: %d, portrait height: %d",
                   (int)faceBB.left, (int)faceBB.right, (int)faceBB.top, (int)faceBB.bottom, (int)faceBB.width(), (int)faceBB.height(), portraitBmp.getWidth(), portraitBmp.getHeight());
           if (faceBB.left + faceBB.width() > portraitBmp.getWidth()) {
             Toast.makeText(this, "脸部在屏幕边缘", Toast.LENGTH_SHORT ).show();
@@ -596,6 +594,33 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
           }
         }
 
+        // 活体检测
+        LOGGER.i("Running face live check on face " + currImgCounter);
+        /**
+         *    1       2       3       4        5          6          7            8
+         * <p>
+         * 888888  888888      88  88      8888888888  88                  88  8888888888
+         * 88          88      88  88      88  88      88  88          88  88      88  88
+         * 8888      8888    8888  8888    88          8888888888  8888888888          88
+         * 88          88      88  88
+         * 88          88  888888  888888
+         */
+        // 原演示 App 使用 640x480 宽高图片 YUV420SP（NV21） 作为输入，方向为 7，输入后会进行人脸检测
+        // 这里用 480x640 作为输入，原始方向，使用 MLKit 人脸检测的位置
+        // 如果不论真脸假脸，结果 confidence 都在 0.5 附近，检查图片数据格式、人脸位置、方向
+        //
+        // faceBox 用屏幕左上角作为原点，而 faceBB 用的右上角！
+        FaceBox faceBox = new FaceBox((int)(portraitBmp.getWidth()-faceBB.right), (int) faceBB.top, (int) (portraitBmp.getWidth()-faceBB.left), (int) faceBB.bottom, 0F);
+//        FaceBox faceBox = NewFaceBoxFrom(faceBB);
+
+        DetectionResult liveDetectResult = liveFaceEngine.detect(getYUVByBitmap(portraitBmp), portraitBmp.getWidth(), portraitBmp.getHeight(), 1, faceBox);
+        liveDetectResult.setThreshold(0.915F);
+        boolean realFace =  liveDetectResult.getConfidence() > liveDetectResult.getThreshold();
+
+        LOGGER.i("Face live check result on img %d: confidence: %.4f, threshold: %.4f, real? %b, width: %d, height: %d, face left: %d, top: %d, right: %d, bottom: %d, data size: %d, time: %dms",
+                currImgCounter, liveDetectResult.getConfidence(), liveDetectResult.getThreshold(), realFace, portraitBmp.getWidth(), portraitBmp.getHeight(), faceBox.getLeft(), faceBox.getTop(), faceBox.getRight(), faceBox.getBottom(), portraitBmp.getByteCount(), liveDetectResult.getTime());
+
+        // 人脸识别
         final long startTime = SystemClock.uptimeMillis();
         final List<SimilarityClassifier.Recognition> resultsAux = detector.recognizeImage(faceBmp, add);
         lastProcessingTimeMs = SystemClock.uptimeMillis() - startTime;
@@ -612,19 +637,23 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
           float conf = result.getDistance();
           if (conf < 1.0f) {
-
             confidence = conf;
             label = result.getTitle();
             if (result.getId().equals("0")) {
               color = Color.GREEN;
-            } else if (!realFace) {
-              color = Color.BLACK;
-              label = "假脸";
             } else {
               color = Color.RED;
             }
           }
-
+          if (!realFace) {
+            color = Color.BLACK;
+            confidence = liveDetectResult.getConfidence();
+            if (label.isEmpty()) {
+              label = "假脸！";
+            } else {
+              label += "，假脸！";
+            }
+          }
         }
 
         if (getCameraFacing() == CameraCharacteristics.LENS_FACING_FRONT) {
@@ -665,6 +694,66 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
 
   }
+  /*
+   * 获取位图的YUV数据
+   */
+  public static byte[] getYUVByBitmap(Bitmap bitmap) {
+    if (bitmap == null) {
+      return null;
+    }
+    int width = bitmap.getWidth();
+    int height = bitmap.getHeight();
 
+    int size = width * height;
 
+    int pixels[] = new int[size];
+    bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+
+    // byte[] data = convertColorToByte(pixels);
+    byte[] data = rgb2YCbCr420(pixels, width, height);
+
+    return data;
+  }
+
+  public static byte[] rgb2YCbCr420(int[] pixels, int width, int height) {
+    int len = width * height;
+    // yuv格式数组大小，y亮度占len长度，u,v各占len/4长度。
+    byte[] yuv = new byte[len * 3 / 2];
+    int y, u, v;
+    for (int i = 0; i < height; i++) {
+      for (int j = 0; j < width; j++) {
+        // 屏蔽ARGB的透明度值
+        int rgb = pixels[i * width + j] & 0x00FFFFFF;
+        // 像素的颜色顺序为bgr，移位运算。
+        int r = rgb & 0xFF;
+        int g = (rgb >> 8) & 0xFF;
+        int b = (rgb >> 16) & 0xFF;
+        // 套用公式
+        y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
+        u = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
+        v = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
+        // rgb2yuv
+        // y = (int) (0.299 * r + 0.587 * g + 0.114 * b);
+        // u = (int) (-0.147 * r - 0.289 * g + 0.437 * b);
+        // v = (int) (0.615 * r - 0.515 * g - 0.1 * b);
+        // RGB转换YCbCr
+        // y = (int) (0.299 * r + 0.587 * g + 0.114 * b);
+        // u = (int) (-0.1687 * r - 0.3313 * g + 0.5 * b + 128);
+        // if (u > 255)
+        // u = 255;
+        // v = (int) (0.5 * r - 0.4187 * g - 0.0813 * b + 128);
+        // if (v > 255)
+        // v = 255;
+        // 调整
+        y = y < 16 ? 16 : (y > 255 ? 255 : y);
+        u = u < 0 ? 0 : (u > 255 ? 255 : u);
+        v = v < 0 ? 0 : (v > 255 ? 255 : v);
+        // 赋值
+        yuv[i * width + j] = (byte) y;
+        yuv[len + (i >> 1) * width + (j & ~1) + 0] = (byte) u;
+        yuv[len + +(i >> 1) * width + (j & ~1) + 1] = (byte) v;
+      }
+    }
+    return yuv;
+  }
 }

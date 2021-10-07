@@ -42,10 +42,13 @@ class Live : Component() {
         orientation: Int,
         faceBox: FaceBox
     ): Float {
-//        这是什么校验？？
-//        if (previewWidth * previewHeight * 3 / 2 != yuv.size) {
-//            throw IllegalArgumentException("Invalid yuv data")
-//        }
+        // 这是什么校验？
+        // 输入图像：YUV420SP
+        // YUV 4:2:0采样，每四个Y共用一组UV分量,一个YUV占8+2+2 = 12bits 1.5个字节。
+        // 我们最常见的YUV420P和YUV420SP都是基于4:2:0采样的，所以如果图片的宽为width，高为heigth，在内存中占的空间为width * height * 3 / 2
+        if (previewWidth * previewHeight * 3 / 2 != yuv.size) {
+            throw IllegalArgumentException("Invalid yuv data size or ratio")
+        }
 
         return nativeDetectYuv(
             yuv,

@@ -17,7 +17,7 @@ android {
         debug {
             debuggable true
             jniDebuggable true
-            minifyEnabled true
+            minifyEnabled false
 //            https://developer.android.com/studio/build/shrink-code?utm_source=android-studio#shrink-resources
 //            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
@@ -28,7 +28,6 @@ android {
             jniDebuggable false
             minifyEnabled true
 //            shrinkResources true
-            minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }

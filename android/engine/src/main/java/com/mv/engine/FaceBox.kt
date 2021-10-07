@@ -1,6 +1,7 @@
 package org.tensorflow.lite.examples.engine
 
 import android.graphics.Rect
+import android.graphics.RectF
 import androidx.annotation.Keep
 
 @Keep
@@ -12,9 +13,11 @@ data class FaceBox(
     var confidence: Float
 )
 
-fun NewFaceBoxFrom(rec: Rect): FaceBox {
+
+
+fun NewFaceBoxFrom(rec: RectF): FaceBox {
     if (rec == null) {
         return FaceBox(0,0,0,0,0F);
     }
-    return FaceBox(rec.left, rec.top, rec.right, rec.bottom, 0F);
+    return FaceBox(rec.left.toInt(), rec.top.toInt(), rec.right.toInt(), rec.bottom.toInt(), 0F);
 }
