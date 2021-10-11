@@ -69,6 +69,7 @@ public abstract class CameraActivity extends AppCompatActivity
 
   private static final String PERMISSION_CAMERA = Manifest.permission.CAMERA;
   private static final String PERMISSION_WRITE_STORATGE = Manifest.permission.WRITE_EXTERNAL_STORAGE;
+    private static final String PERMISSION_BLUETOOTH = Manifest.permission.BLUETOOTH;
   protected int previewWidth = 0;
   protected int previewHeight = 0;
   private boolean debug = false;
@@ -436,7 +437,8 @@ public abstract class CameraActivity extends AppCompatActivity
   private boolean hasPermission() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
       return checkSelfPermission(PERMISSION_CAMERA) == PackageManager.PERMISSION_GRANTED &&
-              checkSelfPermission(PERMISSION_WRITE_STORATGE) == PackageManager.PERMISSION_GRANTED;
+              checkSelfPermission(PERMISSION_WRITE_STORATGE) == PackageManager.PERMISSION_GRANTED &&
+              checkSelfPermission(PERMISSION_BLUETOOTH) == PackageManager.PERMISSION_GRANTED;
     } else {
       return true;
     }
@@ -458,7 +460,14 @@ public abstract class CameraActivity extends AppCompatActivity
                 Toast.LENGTH_LONG)
                 .show();
       }
-      requestPermissions(new String[] {PERMISSION_CAMERA, PERMISSION_WRITE_STORATGE}, PERMISSIONS_REQUEST);
+    if (shouldShowRequestPermissionRationale(PERMISSION_BLUETOOTH)) {
+        Toast.makeText(
+                CameraActivity.this,
+                "Bluetooth permission is required for this demo",
+                Toast.LENGTH_LONG)
+                .show();
+    }
+      requestPermissions(new String[] {PERMISSION_CAMERA, PERMISSION_WRITE_STORATGE, PERMISSION_BLUETOOTH}, PERMISSIONS_REQUEST);
     }
   }
 

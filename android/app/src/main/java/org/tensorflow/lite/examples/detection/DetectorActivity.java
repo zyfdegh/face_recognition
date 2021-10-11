@@ -17,7 +17,12 @@
 package org.tensorflow.lite.examples.detection;
 
 import android.app.AlertDialog;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothSocket;
 import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
 import android.graphics.Canvas;
@@ -29,8 +34,10 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.hardware.camera2.CameraCharacteristics;
 import android.media.ImageReader.OnImageAvailableListener;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.util.Log;
 import android.util.Size;
 import android.util.TypedValue;
 import android.view.LayoutInflater;
@@ -52,9 +59,11 @@ import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.io.OutputStream;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.UUID;
+
 import org.tensorflow.lite.examples.detection.customview.OverlayView;
 import org.tensorflow.lite.examples.detection.customview.OverlayView.DrawCallback;
 import org.tensorflow.lite.examples.detection.env.BorderedText;
@@ -64,8 +73,6 @@ import org.tensorflow.lite.examples.detection.tflite.SimilarityClassifier;
 import org.tensorflow.lite.examples.detection.tflite.TFLiteObjectDetectionAPIModel;
 import org.tensorflow.lite.examples.detection.tracking.MultiBoxTracker;
 import org.tensorflow.lite.examples.engine.FaceBox;
-
-import static org.tensorflow.lite.examples.engine.FaceBoxKt.NewFaceBoxFrom;
 
 /**
  * An activity that uses a TensorFlowMultiBoxDetector and ObjectTracker to detect and then track
@@ -85,25 +92,38 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   private static final int TF_OD_API_INPUT_SIZE = 112;
   private static final boolean TF_OD_API_IS_QUANTIZED = false;
   private static final String TF_OD_API_MODEL_FILE = "mobile_face_net.tflite";
-
-
   private static final String TF_OD_API_LABELS_FILE = "file:///android_asset/labelmap.txt";
-
   private static final DetectorMode MODE = DetectorMode.TF_OD_API;
   // Minimum detection confidence to track a detection.
   private static final float MINIMUM_CONFIDENCE_TF_OD_API = 0.5f;
   private static final boolean MAINTAIN_ASPECT = false;
 
+  // image setting
   private static final Size DESIRED_PREVIEW_SIZE = new Size(640, 480);
   private static final Size LIVE_INPUT_SIZE = new Size(640, 480);
   //private static final int CROP_SIZE = 320;
   //private static final Size CROP_SIZE = new Size(320, 320);
 
+  // bluetooth
+  private static boolean btConnecting = false;
+  private static boolean btWriteError = false;
+  private static final String BT_CMD_ON = "A00101A2";
+  private static final String BT_CMD_OFF = "A00100A1";
+  public static final int MESSAGE_READ = 0;
+  public static final int MESSAGE_WRITE = 1;
+  public static final int MESSAGE_TOAST = 2;
+  private BluetoothAdapter btAdapter = null;
+  private BluetoothSocket btSocket = null;
+  private static final String BT_MAC_ADDR_HARDCODE = "D8:76:E8:EC:B6:01";
+  private static final String BT_UUID_HARDCODE = "00001101-0000-1000-8000-00805F9B34FB";
+  private BluetoothSocket btSock = null;
 
   private static final boolean SAVE_FACE_WHEN_ADD = true;
   private static final float TEXT_SIZE_DIP = 10;
   OverlayView trackingOverlay;
   private Integer sensorOrientation;
+
+  private static final String TAG = "DetectorActivity";
 
   // 人脸识别
   private SimilarityClassifier detector;
@@ -139,6 +159,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   private Bitmap faceBmp = null;
 
   private FloatingActionButton fabAdd;
+  private FloatingActionButton fabSetting;
 
 //  private HashMap<String, Classifier.Recognition> knownFaces = new HashMap<>();
 
@@ -175,6 +196,34 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
       }
     });
 
+    fabSetting = findViewById(R.id.fab_setting);
+    fabSetting.setOnClickListener(new View.OnClickListener(){
+      @Override
+      public void onClick(View view) {
+        onSettingClick();
+      }
+    });
+
+    if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH)) {
+      Toast.makeText(this, "bluetooth not supported", Toast.LENGTH_SHORT).show();
+    } else {
+      btAdapter = BluetoothAdapter.getDefaultAdapter();
+      if (!btAdapter.isEnabled()) {
+        Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+        int reqCode = 1;
+        startActivityForResult(enableBtIntent, reqCode);
+//      onActivityResult(reqCode, respCode, enableBtIntent);
+      }
+      if (!btAdapter.isEnabled()) {
+        Log.w(TAG, "bluetooth not on");
+      } else {
+//          Discovery is not managed by the Activity, but is run as a system service, so an application
+//          should always call BluetoothAdapter.cancelDiscovery() even if it did not directly request a discovery, just to be sure.
+        btAdapter.cancelDiscovery();
+      }
+    }
+
+    ;
     // Real-time contour detection of multiple faces
     FaceDetectorOptions options =
             new FaceDetectorOptions.Builder()
@@ -201,6 +250,97 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
     if (!faceDetected) {
       Toast.makeText(this, "未检测到人脸", Toast.LENGTH_SHORT ).show();
     }
+  }
+
+  private void onSettingClick() {
+    blinkBluetoothSwitchAsync();
+  }
+
+  private void blinkBluetoothSwitchAsync() {
+    Toast.makeText(this, "测试开关", Toast.LENGTH_SHORT).show();
+
+    try {
+      btAsyncSendBytes(hexStringToByteArray(BT_CMD_ON));
+      Thread.sleep(500);
+      btAsyncSendBytes(hexStringToByteArray(BT_CMD_OFF));
+    } catch (IOException | InterruptedException e) {
+      e.printStackTrace();
+    }
+  }
+
+  private String byteToHexString(byte[] payload) {
+    if (payload == null) return "<empty>";
+    StringBuilder stringBuilder = new StringBuilder(payload.length);
+    for (byte byteChar : payload)
+      stringBuilder.append(String.format("%02X ", byteChar));
+    return stringBuilder.toString();
+  }
+
+  public static byte[] hexStringToByteArray(String s) {
+    int len = s.length();
+    byte[] data = new byte[len / 2];
+    for (int i = 0; i < len; i += 2) {
+      data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)
+              + Character.digit(s.charAt(i+1), 16));
+    }
+    return data;
+  }
+
+  private void btAsyncSendBytes(byte[] data) throws IOException {
+    AsyncTask.execute(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          btSendBytes(data);
+        } catch (IOException e) {
+          e.printStackTrace();
+        }
+      }
+    });
+  }
+
+  private void btSendBytes(byte[] data) throws IOException {
+    if ((btSock == null || !btSock.isConnected() || btWriteError) && !btConnecting) {
+      btConnecting = true;
+      Log.i(TAG, "try to connect bluetooth...");
+      BluetoothDevice btDevice = btAdapter.getRemoteDevice(BT_MAC_ADDR_HARDCODE);
+//          Method rfcommMethod = btDevice.getClass().getMethod("createRfcommSocket",
+//                  new Class[] { int.class });
+//          btSock = (BluetoothSocket) rfcommMethod.invoke(btDevice, Integer.valueOf(1));
+      Log.i(TAG, "bluetooth name " + btDevice.getName() + ", mac: " + btDevice.getAddress());
+
+      if (btSock != null && btSock.isConnected()) {
+        btSock.close();
+      }
+      btSock = btDevice.createRfcommSocketToServiceRecord(UUID.fromString(BT_UUID_HARDCODE));
+      btSock.connect();
+      Log.i(TAG, "connected to bluetooth");
+      btConnecting = false;
+    }
+
+    if (btSock == null) {
+      return;
+    }
+
+    OutputStream tmpOut = null;
+
+    Log.i(TAG, "try sending data to bluetooth...");
+    try {
+      tmpOut = btSock.getOutputStream();
+      tmpOut.write(data);
+      Log.i(TAG, "sent data to bluetooth..." + byteToHexString(data));
+//      byte[] mmBuffer = new byte[1024];
+//      Handler handler = new Handler();
+//      Message writtenMsg = handler.obtainMessage(MESSAGE_WRITE, -1, -1, mmBuffer);
+//      writtenMsg.sendToTarget();
+    } catch (IOException e) {
+      btWriteError = true;
+      Log.e(TAG, "Error occurred when creating output stream", e);
+    }
+
+//    for(int i=0; i < data.length; i++){
+//      new DataOutputStream(btSock.getOutputStream()).writeByte(data[i]);
+//    }
   }
 
   @Override
@@ -339,12 +479,12 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
               public void onSuccess(List<Face> faces) {
                 if (faces.size() == 0) {
                   updateResults(currImgCounter, new LinkedList<>());
-                  LOGGER.d("---- no face detected");
+                  LOGGER.v("---- no face detected %s", currImgCounter);
                   canAddFace = false;
                   faceDetected = false;
                   return;
                 }
-                LOGGER.d("---- face detected");
+                LOGGER.v("---- face detected %s", currImgCounter);
                 faceDetected = true;
                 runInBackground(
                         new Runnable() {
@@ -641,6 +781,8 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
             label = result.getTitle();
             if (result.getId().equals("0")) {
               color = Color.GREEN;
+              confidence = 1 - confidence; // 取反
+              blinkBluetoothSwitchAsync();
             } else {
               color = Color.RED;
             }

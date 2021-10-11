@@ -16,8 +16,5 @@ data class FaceBox(
 
 
 fun NewFaceBoxFrom(rec: RectF): FaceBox {
-    if (rec == null) {
-        return FaceBox(0,0,0,0,0F);
-    }
     return FaceBox(rec.left.toInt(), rec.top.toInt(), rec.right.toInt(), rec.bottom.toInt(), 0F);
 }
