@@ -25,6 +25,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
@@ -36,6 +37,7 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.media.ImageReader.OnImageAvailableListener;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.SystemClock;
 import android.util.Log;
 import android.util.Size;
@@ -58,6 +60,7 @@ import com.google.mlkit.vision.face.FaceDetection;
 import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.LinkedList;
@@ -180,6 +183,13 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   @Override
   public synchronized void onDestroy() {
     liveFaceEngine.destroy();
+    if (btSock != null) {
+      try {
+          btSock.close();
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+    }
     super.onDestroy();
   }
 
@@ -222,6 +232,8 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
         btAdapter.cancelDiscovery();
       }
     }
+
+    asyncLoadBitmaps2RAM();
 
     ;
     // Real-time contour detection of multiple faces
@@ -284,6 +296,57 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
               + Character.digit(s.charAt(i+1), 16));
     }
     return data;
+  }
+
+  private void asyncLoadBitmaps2RAM() {
+    AsyncTask.execute(new Runnable() {
+      @Override
+      public void run() {
+        Log.i(TAG, "开始加载本地人脸");
+        int[] countArr = loadLocalBitmaps();
+        if (countArr.length >= 2) {
+          Log.i(TAG, String.format("完成人脸加载，共 %d 人 %d 张", countArr[0], countArr[1]));
+        } else {
+          Log.i(TAG, "完成人脸加载");
+        }
+      }
+    });
+  }
+
+  private int[] loadLocalBitmaps() {
+    String root = Environment.getExternalStorageDirectory().getAbsolutePath() + File.separator + ImageUtils.APP_DATA_DIR;
+    final File myDir = new File(root);
+    if (!myDir.exists()) {
+      LOGGER.i("directory not found, skip scan");
+    }
+    int subdirCount = 0;
+    int fileCount = 0;
+    File[] subdirs = myDir.listFiles();
+    for (int i = 0; i < subdirs.length; i++) {
+      LOGGER.d("Checking bitmaps in: %s", subdirs[i].getAbsolutePath());
+      if (!subdirs[i].exists() || !subdirs[i].isDirectory()) {
+        continue;
+      }
+      subdirCount++;
+      File[] files = subdirs[i].listFiles();
+      LOGGER.d("Found %d bitmaps in: %s", files.length, subdirs[i].getAbsolutePath());
+      // FIXME 返回的文件不保证按名称字母排序
+      for (int j = files.length-1; j >= 0; j--) {
+        // 最多取最后的 5 张，为了节约内存
+        if (files.length - j > ImageUtils.MAX_IMG_PER_USER) {
+          break;
+        }
+        fileCount++;
+        String filepath = files[j].getAbsolutePath();
+        LOGGER.i("Loading bitmap %d to RAM mapping, file path: %s", j, filepath);
+        String label = subdirs[i].getName();
+        SimilarityClassifier.Recognition rec = new SimilarityClassifier.Recognition("0", label, 0.0F, new RectF());
+        rec.setCrop(BitmapFactory.decodeFile(filepath));
+        detector.register(label, rec);
+        LOGGER.i("Register success %s: %s", label, filepath);
+      }
+    }
+    return new int[]{subdirCount, fileCount};
   }
 
   private void btAsyncSendBytes(byte[] data) throws IOException {
@@ -597,6 +660,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
           // For examining the actual TF input.
           if (SAVE_FACE_WHEN_ADD) {
+            // 存储路径：/sdcard/mp-face-imgs/<name>/<timestamp>.png
             ImageUtils.saveBitmap(rec.getCrop(), name,System.currentTimeMillis() + ".png");
           }
           //knownFaces.put(name, rec);
@@ -781,7 +845,6 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
             label = result.getTitle();
             if (result.getId().equals("0")) {
               color = Color.GREEN;
-              confidence = 1 - confidence; // 取反
               blinkBluetoothSwitchAsync();
             } else {
               color = Color.RED;

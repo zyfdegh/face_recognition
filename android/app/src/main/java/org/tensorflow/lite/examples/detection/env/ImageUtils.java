@@ -23,7 +23,8 @@ import java.io.FileOutputStream;
 
 /** Utility class for manipulating images. */
 public class ImageUtils {
-  static final String APP_DATA_DIR = "mp-face-imgs";
+  public static final int MAX_IMG_PER_USER = 5;
+  public static final String APP_DATA_DIR = "mp-face-imgs";
 
   // This value is 2 ^ 18 - 1, and is used to clamp the RGB values before their ranges
   // are normalized to eight bits.

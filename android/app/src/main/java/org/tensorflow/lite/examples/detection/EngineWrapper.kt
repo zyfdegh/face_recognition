@@ -19,14 +19,10 @@ class EngineWrapper(private var assetManager: AssetManager) {
 
     fun detect(yuv: ByteArray, width: Int, height: Int, orientation: Int, box: FaceBox): DetectionResult {
         // 去掉了人脸检测，只进行活体检测
-        if (box != null) {
-            val begin = System.currentTimeMillis()
-            box.confidence = detectLive(yuv, width, height, orientation, box)
-            val end = System.currentTimeMillis()
-            return DetectionResult(box, end - begin, true)
-        }
-
-        return DetectionResult()
+        val begin = System.currentTimeMillis()
+        box.confidence = detectLive(yuv, width, height, orientation, box)
+        val end = System.currentTimeMillis()
+        return DetectionResult(box, end - begin, true)
     }
 
     private fun detectLive(
