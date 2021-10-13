@@ -24,6 +24,8 @@ public interface SimilarityClassifier {
 
   void register(String name, Recognition recognition);
 
+  float[][] generateEmbeddings(Bitmap bitmap);
+
   List<Recognition> recognizeImage(Bitmap bitmap, boolean getExtra);
 
   void enableStatLogging(final boolean debug);
@@ -51,6 +53,7 @@ public interface SimilarityClassifier {
      * A sortable score for how good the recognition is relative to others. Lower should be better.
      */
     private final Float distance;
+    // 重要：extra 放的是图像的特征矩阵，即 embeddings，一维、长度 192 的浮点数
     private Object extra;
 
     /** Optional location within the source image for the location of the recognized object. */

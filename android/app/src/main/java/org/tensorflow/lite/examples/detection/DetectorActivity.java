@@ -54,6 +54,7 @@ import androidx.annotation.NonNull;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.google.gson.Gson;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.face.Face;
 import com.google.mlkit.vision.face.FaceDetection;
@@ -61,6 +62,10 @@ import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
 
 import java.io.File;
+import java.io.FileFilter;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.LinkedList;
@@ -121,7 +126,13 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   private static final String BT_UUID_HARDCODE = "00001101-0000-1000-8000-00805F9B34FB";
   private BluetoothSocket btSock = null;
 
+  // 用来防止同一个人脸，不停被识别，不停开门的情况（只开一次）
+  private static String lastRecognizedLabel = "";
+
+  // 存储人脸图
   private static final boolean SAVE_FACE_WHEN_ADD = true;
+  private static final String FACE_EMBEDDING_SUFFIX = ".embeddings";
+
   private static final float TEXT_SIZE_DIP = 10;
   OverlayView trackingOverlay;
   private Integer sensorOrientation;
@@ -233,9 +244,6 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
       }
     }
 
-    asyncLoadBitmaps2RAM();
-
-    ;
     // Real-time contour detection of multiple faces
     FaceDetectorOptions options =
             new FaceDetectorOptions.Builder()
@@ -249,6 +257,8 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
     faceDetector = detector;
 
+    // 异步加载 SD 卡人脸图到内存
+//    asyncLoadBitmaps2RAM();
 
 //    checkWritePermission();
 
@@ -265,12 +275,11 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   }
 
   private void onSettingClick() {
+    Toast.makeText(this, "测试开关", Toast.LENGTH_SHORT).show();
     blinkBluetoothSwitchAsync();
   }
 
   private void blinkBluetoothSwitchAsync() {
-    Toast.makeText(this, "测试开关", Toast.LENGTH_SHORT).show();
-
     try {
       btAsyncSendBytes(hexStringToByteArray(BT_CMD_ON));
       Thread.sleep(500);
@@ -305,7 +314,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
         Log.i(TAG, "开始加载本地人脸");
         int[] countArr = loadLocalBitmaps();
         if (countArr.length >= 2) {
-          Log.i(TAG, String.format("完成人脸加载，共 %d 人 %d 张", countArr[0], countArr[1]));
+          Log.i(TAG, String.format("完成人脸加载，共 %d 人，取了 %d 张", countArr[0], countArr[1]));
         } else {
           Log.i(TAG, "完成人脸加载");
         }
@@ -314,6 +323,14 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   }
 
   private int[] loadLocalBitmaps() {
+    if (detector == null) {
+      try {
+        // FIXME 等待相机、detector 初始化
+        Thread.sleep(2000);
+      } catch (InterruptedException e) {
+        e.printStackTrace();
+      }
+    }
     String root = Environment.getExternalStorageDirectory().getAbsolutePath() + File.separator + ImageUtils.APP_DATA_DIR;
     final File myDir = new File(root);
     if (!myDir.exists()) {
@@ -321,32 +338,64 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
     }
     int subdirCount = 0;
     int fileCount = 0;
-    File[] subdirs = myDir.listFiles();
+    File[] subdirs = myDir.listFiles(new DirectoryFilter());
     for (int i = 0; i < subdirs.length; i++) {
       LOGGER.d("Checking bitmaps in: %s", subdirs[i].getAbsolutePath());
-      if (!subdirs[i].exists() || !subdirs[i].isDirectory()) {
+      if (!subdirs[i].exists()) {
         continue;
       }
       subdirCount++;
-      File[] files = subdirs[i].listFiles();
+
+      // 过滤 png 文件，再查找 .embedding 文件，找不到则生成并存储
+      File[] files = subdirs[i].listFiles(new PngFilter());
       LOGGER.d("Found %d bitmaps in: %s", files.length, subdirs[i].getAbsolutePath());
       // FIXME 返回的文件不保证按名称字母排序
       for (int j = files.length-1; j >= 0; j--) {
+        String filepath = files[j].getAbsolutePath();
+        LOGGER.i("Loading bitmap and embeddings to RAM, %d, file path: %s", j, filepath);
+        String label = subdirs[i].getName();
+        SimilarityClassifier.Recognition rec = new SimilarityClassifier.Recognition("0", label, 0.0F, new RectF());
+        Bitmap img = BitmapFactory.decodeFile(filepath);
+
+        Object embeddings = null;
+        final String embeddingsFilename = filepath + FACE_EMBEDDING_SUFFIX;
+        final File embeddingsFile = new File(embeddingsFilename);
+        if (embeddingsFile.exists()) {
+          embeddings = parseEmbeddingsFile(embeddingsFile);
+        } else if (img.getWidth() == TF_OD_API_INPUT_SIZE && img.getHeight() == TF_OD_API_INPUT_SIZE) {
+          embeddings = detector.generateEmbeddings(img);
+          ImageUtils.saveEmbeddingAsFile(embeddings, subdirs[i].getName(), embeddingsFilename);
+        }
+        if (embeddings == null) {
+          continue;
+        }
+        detector.register(label, rec);
+        LOGGER.i("Register success %s: %s", label, filepath);
         // 最多取最后的 5 张，为了节约内存
         if (files.length - j > ImageUtils.MAX_IMG_PER_USER) {
           break;
         }
         fileCount++;
-        String filepath = files[j].getAbsolutePath();
-        LOGGER.i("Loading bitmap %d to RAM mapping, file path: %s", j, filepath);
-        String label = subdirs[i].getName();
-        SimilarityClassifier.Recognition rec = new SimilarityClassifier.Recognition("0", label, 0.0F, new RectF());
-        rec.setCrop(BitmapFactory.decodeFile(filepath));
-        detector.register(label, rec);
-        LOGGER.i("Register success %s: %s", label, filepath);
       }
     }
     return new int[]{subdirCount, fileCount};
+  }
+
+  private Object parseEmbeddingsFile(File f) {
+    try {
+      FileInputStream in = new FileInputStream(f);
+      int size = in.available();
+      byte[] buffer = new byte[size];
+      in.read(buffer);
+      in.read();
+      // FIXME
+      return new float[][]{};
+    } catch (FileNotFoundException e) {
+      e.printStackTrace();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+    return null;
   }
 
   private void btAsyncSendBytes(byte[] data) throws IOException {
@@ -545,6 +594,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
                   LOGGER.v("---- no face detected %s", currImgCounter);
                   canAddFace = false;
                   faceDetected = false;
+                  lastRecognizedLabel = "";
                   return;
                 }
                 LOGGER.v("---- face detected %s", currImgCounter);
@@ -652,18 +702,21 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
       @Override
       public void onClick(DialogInterface dlg, int i) {
 
-          String name = etName.getText().toString();
-          if (name.isEmpty()) {
+          String label = etName.getText().toString();
+          if (label.isEmpty()) {
               return;
           }
-          detector.register(name, rec);
+          detector.register(label, rec);
 
           // For examining the actual TF input.
           if (SAVE_FACE_WHEN_ADD) {
-            // 存储路径：/sdcard/mp-face-imgs/<name>/<timestamp>.png
-            ImageUtils.saveBitmap(rec.getCrop(), name,System.currentTimeMillis() + ".png");
+            // 存储路径：/sdcard/mp-face-imgs/<label>/<timestamp>.png
+            // 仅 112x112 分辨率
+            String filename = System.currentTimeMillis() + ".png";
+            ImageUtils.saveBitmap(rec.getCrop(), label, filename);
+            ImageUtils.saveEmbeddingAsFile(rec.getExtra(), label,filename + FACE_EMBEDDING_SUFFIX);
           }
-          //knownFaces.put(name, rec);
+          //knownFaces.put(label, rec);
 
           dlg.dismiss();
       }
@@ -672,6 +725,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
     builder.show();
 
   }
+
 
   private void updateResults(long currImgCounter, final List<SimilarityClassifier.Recognition> mappedRecognitions) {
 
@@ -845,7 +899,13 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
             label = result.getTitle();
             if (result.getId().equals("0")) {
               color = Color.GREEN;
-              blinkBluetoothSwitchAsync();
+              // lastRecognizedLabel 用来防止同一个人一直开关
+              // 人脸移出屏幕、或者换一个人时，才会再开一次
+              if (realFace && lastRecognizedLabel != label) {
+                lastRecognizedLabel = label;
+                Log.i(TAG, label + " 识别成功，开门中...");
+                blinkBluetoothSwitchAsync();
+              }
             } else {
               color = Color.RED;
             }
@@ -960,5 +1020,20 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
       }
     }
     return yuv;
+  }
+
+
+  //过滤所有以 .png 结尾的文件
+  class PngFilter implements FilenameFilter {
+    public boolean accept(File dir, String name) {
+      return (name.endsWith(".png"));
+    }
+  }
+
+  //过滤所有目录
+  class DirectoryFilter implements FileFilter {
+    public boolean accept(File f) {
+      return f.isDirectory();
+    }
   }
 }

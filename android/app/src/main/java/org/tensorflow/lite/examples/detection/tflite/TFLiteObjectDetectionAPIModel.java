@@ -85,7 +85,7 @@ public class TFLiteObjectDetectionAPIModel
   // contains the number of detected boxes
   private float[] numDetections;
 
-  private float[][] embeedings;
+  private float[][] embeddings;
 
   private ByteBuffer imgData;
 
@@ -207,9 +207,7 @@ public class TFLiteObjectDetectionAPIModel
 
   }
 
-
-  @Override
-  public List<Recognition> recognizeImage(final Bitmap bitmap, boolean storeExtra) {
+  public float[][] generateEmbeddings(final Bitmap bitmap) {
     // Log this method so that it can be analyzed with systrace.
     Trace.beginSection("recognizeImage");
 
@@ -247,8 +245,8 @@ public class TFLiteObjectDetectionAPIModel
 // Here outputMap is changed to fit the Face Mask detector
     Map<Integer, Object> outputMap = new HashMap<>();
 
-    embeedings = new float[1][OUTPUT_SIZE];
-    outputMap.put(0, embeedings);
+    embeddings = new float[1][OUTPUT_SIZE];
+    outputMap.put(0, embeddings);
 
 
     // Run the inference call.
@@ -256,6 +254,13 @@ public class TFLiteObjectDetectionAPIModel
     //tfLite.runForMultipleInputsOutputs(inputArray, outputMapBack);
     tfLite.runForMultipleInputsOutputs(inputArray, outputMap);
     Trace.endSection();
+    return embeddings;
+  }
+
+
+  @Override
+  public List<Recognition> recognizeImage(final Bitmap bitmap, boolean withEmbeddings) {
+    float[][] embedding = generateEmbeddings(bitmap);
 
 //    String res = "[";
 //    for (int i = 0; i < embeedings[0].length; i++) {
@@ -271,7 +276,7 @@ public class TFLiteObjectDetectionAPIModel
 
     if (registered.size() > 0) {
         //LOGGER.i("dataset SIZE: " + registered.size());
-        final Pair<String, Float> nearest = findNearest(embeedings[0]);
+        final Pair<String, Float> nearest = findNearest(embeddings[0]);
         if (nearest != null) {
 
             final String name = nearest.first;
@@ -295,8 +300,8 @@ public class TFLiteObjectDetectionAPIModel
 
     recognitions.add( rec );
 
-    if (storeExtra) {
-        rec.setExtra(embeedings);
+    if (withEmbeddings) {
+        rec.setExtra(embeddings);
     }
 
     Trace.endSection();

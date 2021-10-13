@@ -20,6 +20,9 @@ import android.graphics.Matrix;
 import android.os.Environment;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
+
+import com.google.gson.Gson;
 
 /** Utility class for manipulating images. */
 public class ImageUtils {
@@ -57,6 +60,40 @@ public class ImageUtils {
     saveBitmap(bitmap, "", filename);
   }
 
+  public static void saveEmbeddingAsFile(final Object embedding, final String subdir, final String filename) {
+    //    /storage/emulated/0/mp-face-imgs/subdir
+    //    Android4.4之后，谷歌禁止在非自己应用的文件夹下创建文件或者是文件夹
+    String root =
+            Environment.getExternalStorageDirectory().getAbsolutePath() + File.separator + APP_DATA_DIR;
+    if (!subdir.isEmpty()) {
+      root += File.separator + subdir;
+    }
+    LOGGER.i("Saving embedding to %s, file: %s", root, filename);
+    final File myDir = new File(root);
+    if (!myDir.exists()) {
+      if (!myDir.mkdirs()) {
+        LOGGER.w("Make dir failed!");
+      }
+    }
+    final File file = new File(myDir, filename);
+    if (file.exists()) {
+      LOGGER.w("Overwriting existing embedding file: %s", filename);
+      file.delete();
+    }
+    try {
+      final FileOutputStream out = new FileOutputStream(file);
+
+      Gson gson = new Gson();
+      String json = gson.toJson(embedding);
+
+      out.write(json.getBytes(StandardCharsets.UTF_8));
+      out.flush();
+      out.close();
+    } catch (final Exception e) {
+      LOGGER.e(e, "Failed to write embedding file!");
+    }
+  }
+
   /**
    * Saves a Bitmap object to disk for analysis.
    *
@@ -73,15 +110,13 @@ public class ImageUtils {
     }
     LOGGER.i("Saving %dx%d bitmap to %s, file: %s", bitmap.getWidth(), bitmap.getHeight(), root, filename);
     final File myDir = new File(root);
-
     if (!myDir.exists()) {
       if (!myDir.mkdirs()) {
         LOGGER.w("Make dir failed!");
       }
     }
 
-    final String fname = filename;
-    final File file = new File(myDir, fname);
+    final File file = new File(myDir, filename);
     if (file.exists()) {
       LOGGER.w("Overwriting existing file: %s", filename);
       file.delete();
