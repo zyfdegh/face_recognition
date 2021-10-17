@@ -46,6 +46,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -70,6 +71,7 @@ import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
@@ -83,6 +85,8 @@ import org.tensorflow.lite.examples.detection.tflite.SimilarityClassifier;
 import org.tensorflow.lite.examples.detection.tflite.TFLiteObjectDetectionAPIModel;
 import org.tensorflow.lite.examples.detection.tracking.MultiBoxTracker;
 import org.tensorflow.lite.examples.engine.FaceBox;
+
+import kotlin.experimental.ExperimentalTypeInference;
 
 /**
  * An activity that uses a TensorFlowMultiBoxDetector and ObjectTracker to detect and then track
@@ -176,12 +180,17 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
   private FloatingActionButton fabAdd;
   private FloatingActionButton fabSetting;
+  private ListView lvSettings;
 
 //  private HashMap<String, Classifier.Recognition> knownFaces = new HashMap<>();
 
   // 活体检测
   private boolean liveFaceEnginePrepared = false;
   private EngineWrapper liveFaceEngine;
+
+  // FIXME 使用 Preference 存储
+  private static String settingPassword = "";
+  private static String inputPassword = "";
 
   @Override
   public synchronized void onResume() {
@@ -227,6 +236,8 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
       }
     });
 
+    lvSettings = findViewById(R.id.lv_settings);
+
     if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH)) {
       Toast.makeText(this, "bluetooth not supported", Toast.LENGTH_SHORT).show();
     } else {
@@ -269,6 +280,9 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
 
   private void onAddClick() {
+    checkPasswordDialog();
+//    Toast.makeText(this, "抱歉，密码错误", Toast.LENGTH_SHORT).show();
+
     canAddFace = true;
     //Toast.makeText(this, "click", Toast.LENGTH_LONG ).show();
     if (!faceDetected) {
@@ -277,6 +291,106 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   }
 
   private void onSettingClick() {
+    checkPasswordDialog();
+
+    showSettingsDialog();
+  }
+
+  private void checkPasswordDialog() {
+    if (settingPassword.isEmpty()) {
+      return;
+    }
+    AlertDialog.Builder builder = new AlertDialog.Builder(this);
+    LayoutInflater inflater = getLayoutInflater();
+    View dialogLayout = inflater.inflate(R.layout.setting_edit_dialog, null);
+    TextView tvTitle = dialogLayout.findViewById(R.id.dlg_setting_title);
+    TextView tvSubtitle = dialogLayout.findViewById(R.id.dlg_setting_subtitle);
+    EditText etInput = dialogLayout.findViewById(R.id.dlg_setting_input);
+
+    tvTitle.setText("需要密码");
+    tvSubtitle.setText("当前为门外模式，此操作需授权");
+    etInput.setHint("请输入密码");
+
+    builder.setPositiveButton("OK", new DialogInterface.OnClickListener(){
+      @Override
+      public void onClick(DialogInterface dlg, int i) {
+        inputPassword = etInput.getText().toString();
+
+        dlg.dismiss();
+      }
+    });
+    builder.setView(dialogLayout);
+    builder.show();
+  }
+
+  private static final String SETTING_PASSWORD = "启用门外模式";
+  private static final String SETTING_DOORNAME = "门的名称";
+  private static final String SETTING_TESTOPEN = "测试开门";
+  private static final String SETTING_FACEREC_THRESHOLD = "人脸识别阈值";
+  private static final String SETTING_LIVEBOD_THRESHOLD = "活体检测阈值";
+  private static final String SETTING_SERVER_ADDR = "服务器地址";
+  private static final String SETTING_DELETE_SOMEONE = "删除某个人";
+
+  private void showSettingsDialog() {
+    SettingItem pwdSetting = new SettingItem(SETTING_PASSWORD, "设置密码，添加人脸、进入设置需要", "输入密码，输入空关闭");
+    if (!settingPassword.isEmpty()) {
+      pwdSetting.setName("关闭门外模式");
+    }
+    final SettingItem[] settings = new SettingItem[]{
+            pwdSetting,
+            new SettingItem(SETTING_DOORNAME, "设置门的名称，以便区分", "输入名称"),
+            new SettingItem(SETTING_TESTOPEN, "测试蓝牙、继电器是否工作", "不填"),
+            new SettingItem(SETTING_FACEREC_THRESHOLD, "设置人脸对比损失函数阈值", "输入 0 以上小数，默认 1"),
+            new SettingItem(SETTING_LIVEBOD_THRESHOLD, "设置活体检测结果阈值", "输入 0-1 之间小数，默认 0.915"),
+            new SettingItem(SETTING_SERVER_ADDR, "设置服务器地址", "http://192.168.5.16:9091"),
+            new SettingItem(SETTING_DELETE_SOMEONE, "删除某个人已录入照片并停用", "输入录入时名称")
+    };
+
+    String[] settingTitles = new String[settings.length];
+    for (int i = 0; i < settings.length; i++) {
+      settingTitles[i] = settings[i].getName();
+    }
+
+    AlertDialog.Builder builder = new AlertDialog.Builder(this);
+    LayoutInflater inflater = getLayoutInflater();
+    View dialogLayout = inflater.inflate(R.layout.setting_edit_dialog, null);
+    TextView tvTitle = dialogLayout.findViewById(R.id.dlg_setting_title);
+    TextView tvSubtitle = dialogLayout.findViewById(R.id.dlg_setting_subtitle);
+    EditText etInput = dialogLayout.findViewById(R.id.dlg_setting_input);
+
+    AlertDialog dialog = new AlertDialog.Builder(this)
+            .setItems(settingTitles, new DialogInterface.OnClickListener() {
+              @Override
+              public void onClick(DialogInterface dialog, int which) {
+                tvTitle.setText(settings[which].getName());
+                tvSubtitle.setText(settings[which].getDescription());
+                etInput.setHint(settings[which].getHint());
+
+                if (settings[which].getName() == SETTING_TESTOPEN) {
+                  // todo 隐藏输入框
+                }
+
+                builder.setPositiveButton("OK", new DialogInterface.OnClickListener(){
+                  @Override
+                  public void onClick(DialogInterface dlg, int i) {
+                    switch (settings[which].getName()) {
+                      case SETTING_PASSWORD:
+                        settingPassword = etInput.getText().toString();
+                      case SETTING_TESTOPEN:
+                        onTestSwitchClick();
+                        break;
+                    }
+                    dlg.dismiss();
+                  }
+                });
+                builder.setView(dialogLayout);
+                builder.show();
+              }
+            }).create();
+    dialog.show();
+  }
+
+  private void onTestSwitchClick() {
     Toast.makeText(this, "测试开关", Toast.LENGTH_SHORT).show();
     blinkBluetoothSwitchAsync();
   }
