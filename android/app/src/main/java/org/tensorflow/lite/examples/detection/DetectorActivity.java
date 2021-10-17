@@ -61,12 +61,14 @@ import com.google.mlkit.vision.face.FaceDetection;
 import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileFilter;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FilenameFilter;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.util.LinkedList;
 import java.util.List;
@@ -258,7 +260,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
     faceDetector = detector;
 
     // 异步加载 SD 卡人脸图到内存
-//    asyncLoadBitmaps2RAM();
+    asyncLoadBitmaps2RAM();
 
 //    checkWritePermission();
 
@@ -364,13 +366,13 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
           embeddings = parseEmbeddingsFile(embeddingsFile);
         } else if (img.getWidth() == TF_OD_API_INPUT_SIZE && img.getHeight() == TF_OD_API_INPUT_SIZE) {
           embeddings = detector.generateEmbeddings(img);
-          ImageUtils.saveEmbeddingAsFile(embeddings, subdirs[i].getName(), embeddingsFilename);
+          ImageUtils.saveEmbeddingAsFile(embeddings, subdirs[i].getName(), files[j].getName() + FACE_EMBEDDING_SUFFIX);
         }
-        if (embeddings == null) {
-          continue;
+        if (embeddings != null) {
+          rec.setExtra(embeddings);
+          detector.register(label, rec);
+          LOGGER.i("Register success %s: %s", label, filepath);
         }
-        detector.register(label, rec);
-        LOGGER.i("Register success %s: %s", label, filepath);
         // 最多取最后的 5 张，为了节约内存
         if (files.length - j > ImageUtils.MAX_IMG_PER_USER) {
           break;
@@ -384,12 +386,18 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   private Object parseEmbeddingsFile(File f) {
     try {
       FileInputStream in = new FileInputStream(f);
-      int size = in.available();
-      byte[] buffer = new byte[size];
-      in.read(buffer);
-      in.read();
-      // FIXME
-      return new float[][]{};
+      BufferedReader reader = new BufferedReader(new InputStreamReader(in));
+
+      String content = "";
+      String line = "";
+      while ((line = reader.readLine()) != null) {
+        content += line;
+      }
+      reader.close();
+
+      Log.d(TAG, "parsing file content to embeddings array: " + content);
+      Gson gson = new Gson();
+      return gson.fromJson(content, float[][].class);
     } catch (FileNotFoundException e) {
       e.printStackTrace();
     } catch (IOException e) {
@@ -713,7 +721,8 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
             // 存储路径：/sdcard/mp-face-imgs/<label>/<timestamp>.png
             // 仅 112x112 分辨率
             String filename = System.currentTimeMillis() + ".png";
-            ImageUtils.saveBitmap(rec.getCrop(), label, filename);
+            // 不要用 rec.getCrop() 因为尺寸不符
+            ImageUtils.saveBitmap(faceBmp, label, filename);
             ImageUtils.saveEmbeddingAsFile(rec.getExtra(), label,filename + FACE_EMBEDDING_SUFFIX);
           }
           //knownFaces.put(label, rec);

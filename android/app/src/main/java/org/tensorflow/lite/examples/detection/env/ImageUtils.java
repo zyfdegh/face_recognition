@@ -51,20 +51,10 @@ public class ImageUtils {
     return ySize + uvSize;
   }
 
-  /**
-   * Saves a Bitmap object to disk for analysis.
-   *
-   * @param bitmap The bitmap to save.
-   */
-  public static void saveBitmap(final Bitmap bitmap, final String filename) {
-    saveBitmap(bitmap, "", filename);
-  }
-
   public static void saveEmbeddingAsFile(final Object embedding, final String subdir, final String filename) {
     //    /storage/emulated/0/mp-face-imgs/subdir
     //    Android4.4之后，谷歌禁止在非自己应用的文件夹下创建文件或者是文件夹
-    String root =
-            Environment.getExternalStorageDirectory().getAbsolutePath() + File.separator + APP_DATA_DIR;
+    String root = Environment.getExternalStorageDirectory().getAbsolutePath() + File.separator + APP_DATA_DIR;
     if (!subdir.isEmpty()) {
       root += File.separator + subdir;
     }
@@ -75,22 +65,24 @@ public class ImageUtils {
         LOGGER.w("Make dir failed!");
       }
     }
+
     final File file = new File(myDir, filename);
-    if (file.exists()) {
-      LOGGER.w("Overwriting existing embedding file: %s", filename);
-      file.delete();
-    }
     try {
-      final FileOutputStream out = new FileOutputStream(file);
+      if (!file.createNewFile()) {
+        LOGGER.w("Overwrite existing embedding file: %s", filename);
+      }
+      if (file.exists()) {
+        final FileOutputStream out = new FileOutputStream(file);
 
-      Gson gson = new Gson();
-      String json = gson.toJson(embedding);
+        Gson gson = new Gson();
+        String json = gson.toJson(embedding);
 
-      out.write(json.getBytes(StandardCharsets.UTF_8));
-      out.flush();
-      out.close();
+        out.write(json.getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        out.close();
+      }
     } catch (final Exception e) {
-      LOGGER.e(e, "Failed to write embedding file!");
+      LOGGER.e(e, "Failed to create or write embeddings, dir: %s, file: %s", subdir, filename);
     }
   }
 
