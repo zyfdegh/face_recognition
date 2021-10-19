@@ -190,7 +190,8 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
   // FIXME 使用 Preference 存储
   private static String settingPassword = "";
-  private static String inputPassword = "";
+  private static Float settingFacerecThreshold = 0.8F;
+  private static Float settingLivebodyThreshold = 0.915F;
 
   @Override
   public synchronized void onResume() {
@@ -280,24 +281,8 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
 
   private void onAddClick() {
-    checkPasswordDialog();
-//    Toast.makeText(this, "抱歉，密码错误", Toast.LENGTH_SHORT).show();
-
-    canAddFace = true;
-    //Toast.makeText(this, "click", Toast.LENGTH_LONG ).show();
-    if (!faceDetected) {
-      Toast.makeText(this, "未检测到人脸", Toast.LENGTH_SHORT ).show();
-    }
-  }
-
-  private void onSettingClick() {
-    checkPasswordDialog();
-
-    showSettingsDialog();
-  }
-
-  private void checkPasswordDialog() {
     if (settingPassword.isEmpty()) {
+      onAddClickDo();
       return;
     }
     AlertDialog.Builder builder = new AlertDialog.Builder(this);
@@ -314,18 +299,58 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
     builder.setPositiveButton("OK", new DialogInterface.OnClickListener(){
       @Override
       public void onClick(DialogInterface dlg, int i) {
-        inputPassword = etInput.getText().toString();
-
-        dlg.dismiss();
+        if (settingPassword.equals(etInput.getText().toString())) {
+          dlg.dismiss();
+          onAddClickDo();
+        }
       }
     });
     builder.setView(dialogLayout);
     builder.show();
   }
 
+  private void onAddClickDo() {
+    canAddFace = true;
+    //Toast.makeText(this, "click", Toast.LENGTH_LONG).show();
+    if (!faceDetected) {
+      Toast.makeText(this, "未检测到人脸", Toast.LENGTH_SHORT ).show();
+    }
+  }
+
+  private void onSettingClick() {
+    if (settingPassword.isEmpty()) {
+      showSettingsDialog();
+      return;
+    }
+    AlertDialog.Builder builder = new AlertDialog.Builder(this);
+    LayoutInflater inflater = getLayoutInflater();
+    View dialogLayout = inflater.inflate(R.layout.setting_edit_dialog, null);
+    TextView tvTitle = dialogLayout.findViewById(R.id.dlg_setting_title);
+    TextView tvSubtitle = dialogLayout.findViewById(R.id.dlg_setting_subtitle);
+    EditText etInput = dialogLayout.findViewById(R.id.dlg_setting_input);
+
+    tvTitle.setText("需要密码");
+    tvSubtitle.setText("当前为门外模式，此操作需授权");
+    etInput.setHint("请输入密码");
+
+    builder.setPositiveButton("OK", new DialogInterface.OnClickListener(){
+      @Override
+      public void onClick(DialogInterface dlg, int i) {
+        if (settingPassword.equals(etInput.getText().toString())) {
+          dlg.dismiss();
+          showSettingsDialog();
+        }
+      }
+    });
+    builder.setView(dialogLayout);
+    builder.show();
+  }
+
+  private static final String SETTING_PASSWD_OFF = "关闭门外模式";
   private static final String SETTING_PASSWORD = "启用门外模式";
   private static final String SETTING_DOORNAME = "门的名称";
   private static final String SETTING_TESTOPEN = "测试开门";
+  private static final String SETTING_BLEMAC = "蓝牙设备地址";
   private static final String SETTING_FACEREC_THRESHOLD = "人脸识别阈值";
   private static final String SETTING_LIVEBOD_THRESHOLD = "活体检测阈值";
   private static final String SETTING_SERVER_ADDR = "服务器地址";
@@ -334,14 +359,15 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   private void showSettingsDialog() {
     SettingItem pwdSetting = new SettingItem(SETTING_PASSWORD, "设置密码，添加人脸、进入设置需要", "输入密码，输入空关闭");
     if (!settingPassword.isEmpty()) {
-      pwdSetting.setName("关闭门外模式");
+      pwdSetting.setName(SETTING_PASSWD_OFF);
     }
     final SettingItem[] settings = new SettingItem[]{
             pwdSetting,
             new SettingItem(SETTING_DOORNAME, "设置门的名称，以便区分", "输入名称"),
             new SettingItem(SETTING_TESTOPEN, "测试蓝牙、继电器是否工作", "不填"),
-            new SettingItem(SETTING_FACEREC_THRESHOLD, "设置人脸对比损失函数阈值", "输入 0 以上小数，默认 1"),
-            new SettingItem(SETTING_LIVEBOD_THRESHOLD, "设置活体检测结果阈值", "输入 0-1 之间小数，默认 0.915"),
+            new SettingItem(SETTING_BLEMAC, "设置蓝牙继电器 MAC 地址", BT_MAC_ADDR_HARDCODE),
+            new SettingItem(SETTING_FACEREC_THRESHOLD, "设置人脸对比损失函数阈值", "输入 0 以上小数，默认 " + settingFacerecThreshold),
+            new SettingItem(SETTING_LIVEBOD_THRESHOLD, "设置活体检测结果阈值", "输入 0-1 之间小数，默认 " + settingLivebodyThreshold),
             new SettingItem(SETTING_SERVER_ADDR, "设置服务器地址", "http://192.168.5.16:9091"),
             new SettingItem(SETTING_DELETE_SOMEONE, "删除某个人已录入照片并停用", "输入录入时名称")
     };
@@ -373,9 +399,23 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
                 builder.setPositiveButton("OK", new DialogInterface.OnClickListener(){
                   @Override
                   public void onClick(DialogInterface dlg, int i) {
+                    String input = etInput.getText().toString();
                     switch (settings[which].getName()) {
                       case SETTING_PASSWORD:
-                        settingPassword = etInput.getText().toString();
+                      case SETTING_PASSWD_OFF:
+                        settingPassword = input;
+                        Log.v(TAG, "setting password to length: " + settingPassword.length());
+                        break;
+                      case SETTING_FACEREC_THRESHOLD:
+                        if (!input.isEmpty()) {
+                          settingFacerecThreshold = Float.parseFloat(etInput.getText().toString());
+                        }
+                        break;
+                      case SETTING_LIVEBOD_THRESHOLD:
+                        if (!input.isEmpty()) {
+                          settingLivebodyThreshold = Float.parseFloat(etInput.getText().toString());
+                        }
+                        break;
                       case SETTING_TESTOPEN:
                         onTestSwitchClick();
                         break;
@@ -391,8 +431,8 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
   }
 
   private void onTestSwitchClick() {
-    Toast.makeText(this, "测试开关", Toast.LENGTH_SHORT).show();
     blinkBluetoothSwitchAsync();
+    Toast.makeText(this, "测试开关", Toast.LENGTH_SHORT).show();
   }
 
   private void blinkBluetoothSwitchAsync() {
@@ -995,7 +1035,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 //        FaceBox faceBox = NewFaceBoxFrom(faceBB);
 
         DetectionResult liveDetectResult = liveFaceEngine.detect(getYUVByBitmap(portraitBmp), portraitBmp.getWidth(), portraitBmp.getHeight(), 1, faceBox);
-        liveDetectResult.setThreshold(0.915F);
+        liveDetectResult.setThreshold(settingLivebodyThreshold);
         boolean realFace =  liveDetectResult.getConfidence() > liveDetectResult.getThreshold();
 
         LOGGER.i("Face live check result on img %d: confidence: %.4f, threshold: %.4f, real? %b, width: %d, height: %d, face left: %d, top: %d, right: %d, bottom: %d, data size: %d, time: %dms",
@@ -1017,15 +1057,20 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 //          }
 
           float conf = result.getDistance();
-          if (conf < 1.0f) {
+          if (conf < settingFacerecThreshold) {
             confidence = conf;
             label = result.getTitle();
             if (result.getId().equals("0")) {
               color = Color.GREEN;
               // lastRecognizedLabel 用来防止同一个人一直开关
               // 人脸移出屏幕、或者换一个人时，才会再开一次
-              if (realFace && lastRecognizedLabel != label) {
-                lastRecognizedLabel = label;
+
+//              if (realFace && lastRecognizedLabel != label) {
+//                lastRecognizedLabel = label;
+//                Log.i(TAG, label + " 识别成功，开门中...");
+//                blinkBluetoothSwitchAsync();
+//              }
+              if (realFace) {
                 Log.i(TAG, label + " 识别成功，开门中...");
                 blinkBluetoothSwitchAsync();
               }
