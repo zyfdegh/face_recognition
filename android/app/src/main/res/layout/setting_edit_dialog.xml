@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:id="@+id/dlg_setting_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:textSize="20sp"
+        tools:text="The dialog title" />
+
+    <TextView
+        android:id="@+id/dlg_setting_subtitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:textSize="20sp"
+        tools:text="The dialog subtitle" />
+
+    <EditText
+        android:layout_gravity="center"
+        android:id="@+id/dlg_setting_input"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        tools:hint="The dialog hint"
+        />
+
+
+</LinearLayout>

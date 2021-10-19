@@ -20,9 +20,15 @@ import android.graphics.Matrix;
 import android.os.Environment;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
+
+import com.google.gson.Gson;
 
 /** Utility class for manipulating images. */
 public class ImageUtils {
+  public static final int MAX_IMG_PER_USER = 5;
+  public static final String APP_DATA_DIR = "mp-face-imgs";
+
   // This value is 2 ^ 18 - 1, and is used to clamp the RGB values before their ranges
   // are normalized to eight bits.
   static final int kMaxChannelValue = 262143;
@@ -45,13 +51,39 @@ public class ImageUtils {
     return ySize + uvSize;
   }
 
-  /**
-   * Saves a Bitmap object to disk for analysis.
-   *
-   * @param bitmap The bitmap to save.
-   */
-  public static void saveBitmap(final Bitmap bitmap) {
-    saveBitmap(bitmap, "preview.png");
+  public static void saveEmbeddingAsFile(final Object embedding, final String subdir, final String filename) {
+    //    /storage/emulated/0/mp-face-imgs/subdir
+    //    Android4.4之后，谷歌禁止在非自己应用的文件夹下创建文件或者是文件夹
+    String root = Environment.getExternalStorageDirectory().getAbsolutePath() + File.separator + APP_DATA_DIR;
+    if (!subdir.isEmpty()) {
+      root += File.separator + subdir;
+    }
+    LOGGER.i("Saving embedding to %s, file: %s", root, filename);
+    final File myDir = new File(root);
+    if (!myDir.exists()) {
+      if (!myDir.mkdirs()) {
+        LOGGER.w("Make dir failed!");
+      }
+    }
+
+    final File file = new File(myDir, filename);
+    try {
+      if (!file.createNewFile()) {
+        LOGGER.w("Overwrite existing embedding file: %s", filename);
+      }
+      if (file.exists()) {
+        final FileOutputStream out = new FileOutputStream(file);
+
+        Gson gson = new Gson();
+        String json = gson.toJson(embedding);
+
+        out.write(json.getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        out.close();
+      }
+    } catch (final Exception e) {
+      LOGGER.e(e, "Failed to create or write embeddings, dir: %s, file: %s", subdir, filename);
+    }
   }
 
   /**
@@ -60,19 +92,25 @@ public class ImageUtils {
    * @param bitmap The bitmap to save.
    * @param filename The location to save the bitmap to.
    */
-  public static void saveBitmap(final Bitmap bitmap, final String filename) {
-    final String root =
-        Environment.getExternalStorageDirectory().getAbsolutePath() + File.separator + "tensorflow";
-    LOGGER.i("Saving %dx%d bitmap to %s.", bitmap.getWidth(), bitmap.getHeight(), root);
+  public static void saveBitmap(final Bitmap bitmap, final String subdir, final String filename) {
+    //    /storage/emulated/0/mp-face-imgs/subdir
+    //    Android4.4之后，谷歌禁止在非自己应用的文件夹下创建文件或者是文件夹
+    String root =
+              Environment.getExternalStorageDirectory().getAbsolutePath() + File.separator + APP_DATA_DIR;
+    if (!subdir.isEmpty()) {
+      root += File.separator + subdir;
+    }
+    LOGGER.i("Saving %dx%d bitmap to %s, file: %s", bitmap.getWidth(), bitmap.getHeight(), root, filename);
     final File myDir = new File(root);
-
-    if (!myDir.mkdirs()) {
-      LOGGER.i("Make dir failed");
+    if (!myDir.exists()) {
+      if (!myDir.mkdirs()) {
+        LOGGER.w("Make dir failed!");
+      }
     }
 
-    final String fname = filename;
-    final File file = new File(myDir, fname);
+    final File file = new File(myDir, filename);
     if (file.exists()) {
+      LOGGER.w("Overwriting existing file: %s", filename);
       file.delete();
     }
     try {
@@ -81,7 +119,7 @@ public class ImageUtils {
       out.flush();
       out.close();
     } catch (final Exception e) {
-      LOGGER.e(e, "Exception!");
+      LOGGER.e(e, "Failed to write file!");
     }
   }
 

@@ -33,6 +33,7 @@ import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Vector;
@@ -84,7 +85,7 @@ public class TFLiteObjectDetectionAPIModel
   // contains the number of detected boxes
   private float[] numDetections;
 
-  private float[][] embeedings;
+  private float[][] embeddings;
 
   private ByteBuffer imgData;
 
@@ -93,9 +94,14 @@ public class TFLiteObjectDetectionAPIModel
 // Face Mask Detector Output
   private float[][] output;
 
-  private HashMap<String, Recognition> registered = new HashMap<>();
+  // 支持一个人多张人脸图
+  private HashMap<String, List<Recognition>> registered = new HashMap<>();
   public void register(String name, Recognition rec) {
-      registered.put(name, rec);
+      if (registered.get(name) == null) {
+        registered.put(name,new ArrayList<Recognition>(){{add(rec);}});
+      } else {
+        registered.get(name).add(rec);
+      }
   }
 
   private TFLiteObjectDetectionAPIModel() {}
@@ -169,32 +175,39 @@ public class TFLiteObjectDetectionAPIModel
   }
 
   // looks for the nearest embeeding in the dataset (using L2 norm)
-  // and retrurns the pair <id, distance>
+  // and returns the pair <id, distance>
   private Pair<String, Float> findNearest(float[] emb) {
 
     Pair<String, Float> ret = null;
-    for (Map.Entry<String, Recognition> entry : registered.entrySet()) {
+    for (Map.Entry<String, List<Recognition>> entry : registered.entrySet()) {
         final String name = entry.getKey();
-        final float[] knownEmb = ((float[][]) entry.getValue().getExtra())[0];
+        Iterator<Recognition> iter = entry.getValue().iterator();
+        // 当前这个人的最相似人脸
+        float nearestDistance = Float.MAX_VALUE;
+        while (iter.hasNext()) {
+          final float[] knownEmb = ((float[][]) iter.next().getExtra())[0];
 
-        float distance = 0;
-        for (int i = 0; i < emb.length; i++) {
-              float diff = emb[i] - knownEmb[i];
-              distance += diff*diff;
+          float distance = 0;
+          for (int i = 0; i < emb.length; i++) {
+            float diff = emb[i] - knownEmb[i];
+            distance += diff*diff;
+          }
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+          }
         }
-        distance = (float) Math.sqrt(distance);
-        if (ret == null || distance < ret.second) {
-            ret = new Pair<>(name, distance);
+        nearestDistance = (float) Math.sqrt(nearestDistance);
+        if (ret == null || nearestDistance < ret.second) {
+          ret = new Pair<>(name, nearestDistance);
         }
+
     }
 
     return ret;
 
   }
 
-
-  @Override
-  public List<Recognition> recognizeImage(final Bitmap bitmap, boolean storeExtra) {
+  public float[][] generateEmbeddings(final Bitmap bitmap) {
     // Log this method so that it can be analyzed with systrace.
     Trace.beginSection("recognizeImage");
 
@@ -232,8 +245,8 @@ public class TFLiteObjectDetectionAPIModel
 // Here outputMap is changed to fit the Face Mask detector
     Map<Integer, Object> outputMap = new HashMap<>();
 
-    embeedings = new float[1][OUTPUT_SIZE];
-    outputMap.put(0, embeedings);
+    embeddings = new float[1][OUTPUT_SIZE];
+    outputMap.put(0, embeddings);
 
 
     // Run the inference call.
@@ -241,6 +254,13 @@ public class TFLiteObjectDetectionAPIModel
     //tfLite.runForMultipleInputsOutputs(inputArray, outputMapBack);
     tfLite.runForMultipleInputsOutputs(inputArray, outputMap);
     Trace.endSection();
+    return embeddings;
+  }
+
+
+  @Override
+  public List<Recognition> recognizeImage(final Bitmap bitmap, boolean withEmbeddings) {
+    float[][] embedding = generateEmbeddings(bitmap);
 
 //    String res = "[";
 //    for (int i = 0; i < embeedings[0].length; i++) {
@@ -256,7 +276,7 @@ public class TFLiteObjectDetectionAPIModel
 
     if (registered.size() > 0) {
         //LOGGER.i("dataset SIZE: " + registered.size());
-        final Pair<String, Float> nearest = findNearest(embeedings[0]);
+        final Pair<String, Float> nearest = findNearest(embeddings[0]);
         if (nearest != null) {
 
             final String name = nearest.first;
@@ -280,8 +300,8 @@ public class TFLiteObjectDetectionAPIModel
 
     recognitions.add( rec );
 
-    if (storeExtra) {
-        rec.setExtra(embeedings);
+    if (withEmbeddings) {
+        rec.setExtra(embeddings);
     }
 
     Trace.endSection();
